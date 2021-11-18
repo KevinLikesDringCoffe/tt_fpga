@@ -1,0 +1,23 @@
+TARGET := hw_emu
+VPPFLAGS := -t $(TARGET) --platform xilinx_u280_xdma_201920_3
+DIRS := 
+#DIRS += -I'/opt/Xilinx/Vitis_HLS/2021.1/include'
+#DIRS += -I'$(XILINX_VIVADO)/include'
+#DIRS += -I'$(XILINX_VITIS)/include'
+
+OBJ := gemv_pipeline.xo
+#OBJ := $(subst .cpp, .xo, $(wildcard *.cpp))
+DEPS := gemv32.hpp
+BIN := gemv_pipeline.xclbin
+
+$(BIN) : $(OBJ)
+	v++ $(VPPFLAGS) --link --vivado.impl.jobs 30 --vivado.synth.jobs 30 '$^' -o'$@' --config ./connectivity.cfg
+
+%.xo : %.cpp $(DEPS)
+	v++ $(VPPFLAGS) -c -k $(basename $(@)) $(DIRS) -I'$(<D)' -o'$@' $<
+
+.PHONY : clean run
+
+clean :
+	rm -rf _x *.log *.compile_summary *.xo .ipcache .Xil *.xclbin *.ltx *.info *.link_summary
+
