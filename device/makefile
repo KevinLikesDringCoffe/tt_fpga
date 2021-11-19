@@ -11,7 +11,7 @@ DEPS := gemv32.hpp
 BIN := gemv_pipeline.xclbin
 
 $(BIN) : $(OBJ)
-	v++ $(VPPFLAGS) --link --vivado.impl.jobs 30 --vivado.synth.jobs 30 '$^' -o'$@' --config ./connectivity.cfg
+	v++ $(VPPFLAGS) --link --vivado.impl.jobs 12 --vivado.synth.jobs 12 '$^' -o'$@' --config ./connectivity.cfg
 
 %.xo : %.cpp $(DEPS)
 	v++ $(VPPFLAGS) -c -k $(basename $(@)) $(DIRS) -I'$(<D)' -o'$@' $<

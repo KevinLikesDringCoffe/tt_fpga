@@ -45,9 +45,9 @@ void randmem(float *ptr, int size)
     }
 }
 
-void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsigned int size) {
-    size_t vector_size_bytes = sizeof(float) * size * 100;
-    size_t matrix_size_bytes = sizeof(float) * size * size * 100;
+void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsigned int size, unsigned int slc) {
+    size_t vector_size_bytes = sizeof(float) * size * slc;
+    size_t matrix_size_bytes = sizeof(float) * size * size * slc;
     
 
     std::cout << "Allocate Buffer in Global Memory\n";
@@ -55,34 +55,39 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
     auto mat1 = xrt::bo(device, matrix_size_bytes, bank_assign[1]);
     auto mat2 = xrt::bo(device, matrix_size_bytes, bank_assign[2]);
     auto mat3 = xrt::bo(device, matrix_size_bytes, bank_assign[3]);
-    auto out = xrt::bo(device, matrix_size_bytes, bank_assign[4]);
+    auto mat4 = xrt::bo(device, matrix_size_bytes, bank_assign[4]);
+    auto out = xrt::bo(device, vector_size_bytes, bank_assign[5]);
 
     // Map the contents of the buffer object into host memory
     auto vec_map = vec.map<float*>();
     auto mat1_map = mat1.map<float*>();
     auto mat2_map = mat2.map<float*>();
     auto mat3_map = mat3.map<float*>();
+    auto mat4_map = mat4.map<float*>();
     auto out_map = out.map<float*>();
 
     std::cout << "Randomize the Test Cores.\n";
-    randmem(vec_map, size * 100);
-    randmem(mat1_map, size * size * 100);
-    randmem(mat2_map, size * size * 100);
-    randmem(mat3_map, size * size * 100);
+    randmem(vec_map, size * slc);
+    randmem(mat1_map, size * size * slc);
+    randmem(mat2_map, size * size * slc);
+    randmem(mat3_map, size * size * slc);
+    randmem(mat4_map, size * size * slc);
 
-    float out_ref[size * 100];
+    float out_ref[size * slc];
 
     std::chrono::duration<double> sw_time(0);
     auto sw_start = std::chrono::high_resolution_clock::now();
 
-    for(int i = 0; i < 100; i++)
+    for(int i = 0; i < slc; i++)
     {
         float buffer1[size];
         gemv(mat1_map + i * size * size, vec_map + i * size, size, size, buffer1);
         float buffer2[size];
         gemv(mat2_map + i * size * size, buffer1, size, size, buffer2);
         float buffer3[size];
-        gemv(mat3_map + i * size * size, buffer2, size, size, out_ref + i * size);
+        gemv(mat3_map + i * size * size, buffer2, size, size, buffer3);
+
+        gemv(mat3_map + i * size * size, buffer2, size, size, out_ref + i * size * size);
     }
 
     auto sw_end = std::chrono::high_resolution_clock::now();
@@ -113,12 +118,13 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
     mat1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     mat2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
     mat3.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    mat4.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     std::chrono::duration<double> kernel_time(0);
 
     std::cout << "Execution of the kernel\n";
     auto kernel_start = std::chrono::high_resolution_clock::now();
-    auto run = krnl(vec, mat1, mat2, mat3, out);
+    auto run = krnl(vec, mat1, mat2, mat3, mat4, out, slc);
     run.wait();
     auto kernel_end = std::chrono::high_resolution_clock::now();
 
@@ -129,11 +135,13 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
 
     // Validate our results
     
-    if (std::memcmp(out_map, out_ref, size * 100))
+    /*
+    if (std::memcmp(out_map, out_ref, size * slc))
         throw std::runtime_error("Value read back does not match reference");
+    */
 
     double result;
-    result = (2 * size + 3 * size * size) * 100 * sizeof(float);
+    result = (4 * size * size) * slc * sizeof(float);
     result /= (1000 * 1000 * 1000); // to GB
     result /= kernel_time.count();   // to GBps
 
@@ -173,15 +181,15 @@ int main(int argc, char* argv[]) {
     auto krnl = xrt::kernel(device, uuid, "gemv_pipeline");
 
     unsigned int dataSize = 32;
+    unsigned int slc = 1000;
     double kernel_time_in_sec = 0, result = 0;
-    const int numBuf = 5; // Since three buffers are being used
+    const int numBuf = 6; // Since three buffers are being used
     int bank_assign[numBuf];
     for (int j = 0; j < numBuf; j++) {
         bank_assign[j] = j;
     }
 
-
-    run_krnl(device, krnl, bank_assign, dataSize);
+    run_krnl(device, krnl, bank_assign, dataSize, slc);
     
     return 0;
 }
