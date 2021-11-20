@@ -36,4 +36,14 @@ The result of 2-stage gemv chain
 | 1000        | 10.3747 GB/s   |  8.69832x         |
 | 10000       | 12.2224 GB/s   |  10.3345x         |
 
+
+The result of 4-stage gemv chain
+| # of slices | Throughput | Acceleration ratio|
+| ----------- | ---------- | ----------------- |
+| 1           | 0.0887137 GB/s |  0.0940525x       |
+| 10          | 0.791938 GB/s  |  0.675752x        |
+| 100         | 6.26858 GB/s   |  2.22466x         |
+| 1000        | 16.5284 GB/s   |  13.8262x         |
+| 10000       | 24.1391 GB/s   |  20.213x          |
+
 The accelaration ratio acctually benefit linearly from the depth of the pipeline because the pipeline achieves paralleling the computing of each stages of gemv, which in software is caculated sequentially.

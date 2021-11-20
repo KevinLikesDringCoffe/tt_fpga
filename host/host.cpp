@@ -78,6 +78,7 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
     std::chrono::duration<double> sw_time(0);
     auto sw_start = std::chrono::high_resolution_clock::now();
 
+    std::cout << "Start SW execution.\n";
     for(int i = 0; i < slc; i++)
     {
         float buffer1[size];
@@ -87,7 +88,7 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
         float buffer3[size];
         gemv(mat3_map + i * size * size, buffer2, size, size, buffer3);
 
-        gemv(mat3_map + i * size * size, buffer2, size, size, out_ref + i * size * size);
+        gemv(mat4_map + i * size * size, buffer3, size, size, out_ref + i * size);
     }
 
     auto sw_end = std::chrono::high_resolution_clock::now();
@@ -181,7 +182,7 @@ int main(int argc, char* argv[]) {
     auto krnl = xrt::kernel(device, uuid, "gemv_pipeline");
 
     unsigned int dataSize = 32;
-    unsigned int slc = 1000;
+    unsigned int slc = 1;
     double kernel_time_in_sec = 0, result = 0;
     const int numBuf = 6; // Since three buffers are being used
     int bank_assign[numBuf];
