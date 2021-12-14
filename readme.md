@@ -47,3 +47,9 @@ The result of 4-stage gemv chain
 | 10000       | 24.1391 GB/s   |  20.213x          |
 
 The accelaration ratio acctually benefit linearly from the depth of the pipeline because the pipeline achieves paralleling the computing of each stages of gemv, which in software is caculated sequentially.
+
+# Version 1.0 updated on 14 Dec
+
+This version contains HLS code of single tt-sgd interation on single entries. This version is ont fully optimized. 
+
+![alt simulation result](./device/v1/Version1.0%20sim.png)
