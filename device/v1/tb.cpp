@@ -10,6 +10,7 @@
 typedef float data_t;
 typedef struct { data_t data[N]; } pkt;
 typedef struct { data_t data[N][N]; } gradient;
+typedef struct { int indices[4]; data_t data; } sp_data;
 
 void mvchain_pipe(
     hls::stream<pkt> &core1_pipevm,
@@ -36,6 +37,14 @@ void outer(
     hls::stream<pkt> &vec1,
     hls::stream<pkt> &vec2, 
     hls::stream<gradient> &out
+);
+
+void pipe(
+    sp_data *data_in,
+    pkt *core1,
+    pkt *core2,
+    pkt *core3,
+    pkt *core4
 );
 
 void rand_core(int rn_prev, int rn, int in, float *out)
@@ -95,6 +104,17 @@ void gevm(float * matrix, float *vectorT, int m, int n, float *out)
     }
 
     return;
+}
+
+float dot(float *vec1, float *vec2, int len )
+{
+    float acc = 0;
+    for(int i = 0; i < len; i++)
+    {
+        acc += vec1[i] * vec2[i];
+    }
+
+    return acc;
 }
 
 void g_nr(float **core, int *tt_rank, int k, int dim, float *out)
@@ -175,6 +195,38 @@ void outer(float *vector, float *vectorT, int m, int n, float *out)
     return;
 }
 
+float sumup(float *mat1, float *mat2, int len)
+{
+    float acc = 0;
+    for(int i = 0; i < len; i++)
+    {
+        acc += mat1[i] * mat2[i];
+    }
+
+    return acc;
+}
+
+void scale(float *mat, float scalor, int len)
+{
+    for(int i = 0; i < len; i++)
+    {
+        mat[i] *= scalor;
+    }
+}
+
+void update_slice(float *slice, int m, int n, float lr, float *grad)
+{
+    for(int i = 0; i < m; i++)
+    {
+        for(int j = 0; j < n; j++)
+        {
+            slice[i * n + j] -= lr * grad[i * n + j];
+        }
+    }
+
+    return;
+}
+
 int main()
 {   
     int mode = M;
@@ -183,6 +235,12 @@ int main()
 
     float *tt_core[mode];
     float *grad[mode];
+    sp_data sp;
+    sp.indices[0] = 1;
+    sp.indices[1] = 2;
+    sp.indices[2] = 3;
+    sp.indices[3] = 4;
+    sp.data = 0.5;
 
     //allocate space for the tt core and initialization
     for(int i = 0; i < mode; i++)
@@ -200,47 +258,77 @@ int main()
     float *core[mode];
     float vec[MAX_BUF_SIZE];
     float vecT[MAX_BUF_SIZE];
+    float x;
 
     for(int j = mode-1; j > -1; j--)
     {
-        core[j] = tt_core[j] + 0 * tt_rank[j] * tt_rank[j+1];
+        core[j] = tt_core[j] + sp.indices[j] * tt_rank[j] * tt_rank[j+1];
     }
 
     for(int j = 0; j < mode; j++)
     {   
-        printf("Mode %d, outer product:\n", j + 1);
+        //printf("Mode %d, outer product:\n", j + 1);
         if(j == 0)
         {
             g_nr(core, tt_rank, 0, mode, grad[0]);
+            /*
             for(int i = 0; i < N; i++)
             {
                 printf("%f ", grad[0][i]);
             }
             printf("\n");
+            */
         }
         else if(j == mode-1)
         {
             g_nl(core, tt_rank, mode-1, mode, grad[mode-1]);
+            /*
             for(int i = 0; i < N; i++)
             {
                 printf("%f ", grad[mode-1][i]);
             }
             printf("\n");
+            */
         }
         else
         {
             g_nl(core, tt_rank, j, mode, vecT);
             g_nr(core, tt_rank, j, mode, vec);
             outer(vecT, vec, tt_rank[j], tt_rank[j+1], grad[j]);
+            //x = dot(vec, vecT, tt_rank[j+1]);
+            /*
             for(int i = 0; i < N * N; i++)
             {
                 printf("%f ", grad[j][i]);
             }
             printf("\n");
+            */
         } 
+        
     }
 
+    x = sumup(grad[1], core[1], tt_rank[1] * tt_rank[1+1]);
+    float y = sp.data;
+/*
+    for(int j = 0 ; j < mode; j ++)
+    {
+        scale(grad[j], x - y, tt_rank[j] * tt_rank[j+1]);
+        update_slice(core[j], tt_rank[j], tt_rank[j+1], 0.01, grad[j]);
+    }
+*/
+    pipe(&sp, (pkt *)tt_core[0], (pkt *)tt_core[1], (pkt *)tt_core[2], (pkt *)tt_core[3]);
 
+    for(int i = 0; i < mode; i++)
+    {   
+        printf("The %dth core value is:", i);
+        for(int j = 0; j < tt_rank[i] * tt_rank[i+1]; j ++)
+        {
+            printf("%f ", *(core[i] + j));
+        }
+        printf("\n");
+    }
+
+/* mvchain test code
     //SW part
     hls::stream<pkt> core1_pipevm;
     hls::stream<pkt> core2_pipevm;
@@ -335,6 +423,7 @@ int main()
     pkt grad2_l = g3l.read();
     pkt grad2_r = g3r.read();
     */
+/*
     hls::stream<gradient> grad1;
     hls::stream<gradient> grad2;
 
@@ -370,4 +459,5 @@ int main()
     {
         printf("%f ", grad3.data[i]);
     }
+*/
 }

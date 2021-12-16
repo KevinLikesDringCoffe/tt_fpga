@@ -324,6 +324,28 @@ out:
     out.write(acc);
 }
 
+void summup(
+    hls::stream<pkt> &grad,
+    hls::stream<pkt> &core,
+    hls::stream<data_t> &out
+)
+{
+    data_t acc = 0;
+    for(int i = 0; i < N; i++)
+    {
+#pragma HLS pipeline
+        pkt grad_ = grad.read();
+        pkt core_ = core.read();
+
+        for(int j = 0; j < N; j++)
+        {
+            acc += grad_.data[j] * core_.data[j];
+        }
+    }
+
+    out.write(acc);
+}
+
 void data_fetch_engine(
     //memory interface
     sp_data *data_in,
@@ -347,7 +369,7 @@ void data_fetch_engine(
     hls::stream<sp_data> &y
 )
 {
-/*
+
 #pragma HLS interface port = data_in mode = m_axi offset = slave bundle = gmem0
 #pragma HLS interface port = core1   mode = m_axi offset = slave bundle = gmem1
 #pragma HLS interface port = core2   mode = m_axi offset = slave bundle = gmem2
@@ -359,9 +381,9 @@ void data_fetch_engine(
 #pragma HLS interface s_axilite port = core2
 #pragma HLS interface s_axilite port = core3
 #pragma HLS interface s_axilite port = core4
-*/
 
-#pragma HLS dataflow
+
+
 
     sp_data temp = *data_in;
     y.write(temp);
@@ -371,18 +393,20 @@ void data_fetch_engine(
     int index_2 = temp.indices[2];
     int index_3 = temp.indices[3];
 
-    int core1_offset = index_0 * N;
+    int core1_offset = index_0;
     int core2_offset = index_1 * N;
     int core3_offset = index_2 * N;
-    int core4_offset = index_3 * N;
+    int core4_offset = index_3;
 
-    for(int i = 0; i < N; i++)
+read_core1:
+    for(int i = 0; i < 1; i++)
     {
 #pragma HLS pipeline
         pkt t = *(core1 + core1_offset + i);
         stream_core1.write(t);
     } 
 
+read_core2:
     for(int i = 0; i < N; i++)
     {
 #pragma HLS pipeline
@@ -390,6 +414,7 @@ void data_fetch_engine(
         stream_core2.write(t);
     } 
 
+read_core3:
     for(int i = 0; i < N; i++)
     {
 #pragma HLS pipeline
@@ -397,7 +422,8 @@ void data_fetch_engine(
         stream_core3.write(t);
     } 
 
-    for(int i = 0; i < N; i++)
+read_core4:
+    for(int i = 0; i < 1; i++)
     {
 #pragma HLS pipeline
         pkt t = *(core4 + core4_offset + i);
@@ -405,6 +431,23 @@ void data_fetch_engine(
     } 
 }
 
+
+void read_engine(
+    hls::stream<int> &slice,
+    pkt *core,
+    hls::stream<pkt> &core_stream
+)
+{
+    int offset = slice.read();
+    
+    for(int i = 0; i < N; i++)
+    {
+#pragma HLS pipeline
+        pkt temp = core[offset + i];
+        core_stream.write(temp);
+    }
+
+}
 
 void write_back_engine(
     //memory interface
@@ -440,12 +483,12 @@ void write_back_engine(
     int index_2 = temp.indices[2];
     int index_3 = temp.indices[3];
 
-    int core1_offset = index_0 * N;
+    int core1_offset = index_0;
     int core2_offset = index_1 * N;
     int core3_offset = index_2 * N;
-    int core4_offset = index_3 * N;
+    int core4_offset = index_3;
 
-    for(int i = 0; i < N; i++)
+    for(int i = 0; i < 1; i++)
     {
 #pragma HLS pipeline
         pkt temp = core1_update.read();
@@ -466,7 +509,7 @@ void write_back_engine(
         *(core3 + core3_offset + i) = temp;
     }
 
-    for(int i = 0; i < N; i++)
+    for(int i = 0; i < 1; i++)
     {
 #pragma HLS pipeline
         pkt temp = core4_update.read();
@@ -500,21 +543,18 @@ void update(
     hls::stream<pkt> &out
 )
 {   
-#pragma HLS dataflow
+#pragma HLS pipeline    
+    pkt core_ = core.read();
+    pkt grad_ = grad.read();
+    pkt temp;
+
     for(int i = 0; i < N; i++)
     {
-#pragma HLS pipeline    
-        pkt core_ = core.read();
-        pkt grad_ = grad.read();
-        pkt temp;
-
-        for(int i = 0; i < N; i++)
-        {
-            temp.data[i] = core_.data[i] - grad_.data[i];
-        }
-
-        out.write(temp);
+#pragma HLS unroll
+        temp.data[i] = core_.data[i] - grad_.data[i];
     }
+
+    out.write(temp);
 }
 
 
@@ -546,7 +586,7 @@ void pipe(
     hls::stream<pkt> core1_for_update, core2_for_update, core3_for_update, core4_for_update;
     hls::stream<sp_data> data_in_, y, update_indices; 
     hls::stream<pkt> g2l, g3l, g4l, g1r, g2r, g3r;
-    hls::stream<pkt> g2l_, g2r_, g2l__, g2r__;
+    hls::stream<pkt> g4l_, g4l__, core4_1, core4_2;
     hls::stream<pkt> grad1, grad2, grad3, grad4;
     hls::stream<pkt> core1_update, core2_update, core3_update, core4_update;
     hls::stream<data_t> x;
@@ -555,33 +595,42 @@ void pipe(
     data_fetch_engine(data_in, core1, core2, core3, core4, core1_in, core2_in, core3_in, core4_in, data_in_);
 
     dup_stream(core1_in, core1_, core1_for_update);
-    dup_stream(core2_in, core2_, core2_for_update);
-    dup_stream(core3_in, core3_, core3_for_update);
+
+    for(int i = 0; i < N; i ++){
+        dup_stream(core2_in, core2_, core2_for_update);
+        dup_stream(core3_in, core3_, core3_for_update);
+    }
     dup_stream(core4_in, core4_, core4_for_update);
-    dup_stream(core2_, core2_pipevm, core2_pipemv);
-    dup_stream(core3_, core3_pipevm, core3_pipemv);
+    dup_stream(core4_, core4_1, core4_2);
+    for(int i = 0; i < N; i++)
+    {
+        dup_stream(core2_, core2_pipevm, core2_pipemv);
+        dup_stream(core3_, core3_pipevm, core3_pipemv);
+    }
     dup_stream_sp(data_in_, y, update_indices);
 
     //calculate gnl and gnr
-    mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_, g2l, g3l, g4l, g1r, g2r, g3r);
+    mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_1, g2l, g3l, g4l, g1r, g2r, g3r);
 
-    dup_stream(g2l, g2l_, g2l__);
-    dup_stream(g2r, g2r_, g2r__);
+    dup_stream(g4l, g4l_, g4l__);
     
     //calculate x
-    dot(g2l_, g2r_, x);
+    dot(g4l_, core4_2, x);
     data_t x_ = x.read();
     data_t y_ = (y.read()).data;
     data_t scaling = (x_ - y_) * 0.01;
 
-    outer(scaling, g2l__, g2r__, grad2);
+    outer(scaling, g2l, g2r, grad2);
     outer(scaling, g3l, g3r, grad3);
     scale(scaling, g1r, grad1);
-    scale(scaling, g4l, grad4);
+    scale(scaling, g4l__, grad4);
 
     update(core1_for_update, grad1, core1_update);
-    update(core2_for_update, grad2, core2_update);
-    update(core3_for_update, grad3, core3_update);
+    for(int i = 0; i < N; i++)
+    {
+        update(core2_for_update, grad2, core2_update);
+        update(core3_for_update, grad3, core3_update);
+    }
     update(core4_for_update, grad4, core4_update);
     
     write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
