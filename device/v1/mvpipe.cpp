@@ -139,6 +139,17 @@ void dup_stream_sp(
     dup2.write(temp);
 }
 
+void dup_stream_int(
+    hls::stream<int> &in,
+    hls::stream<int> &dup1,
+    hls::stream<int> &dup2
+)
+{
+#pragma HLS pipeline
+    int temp = in.read();
+    dup1.write(temp);
+    dup2.write(temp);
+}
 void mvchain_pipe(
     hls::stream<pkt> &core1_pipevm,
     hls::stream<pkt> &core2_pipevm,
@@ -435,18 +446,59 @@ read_core4:
 void read_engine(
     hls::stream<int> &slice,
     pkt *core,
-    hls::stream<pkt> &core_stream
+    hls::stream<pkt> &core_stream,
+    int len
 )
 {
     int offset = slice.read();
     
-    for(int i = 0; i < N; i++)
+    for(int i = 0; i < len; i++)
     {
 #pragma HLS pipeline
         pkt temp = core[offset + i];
         core_stream.write(temp);
     }
+}
 
+void wirte_engine(
+    hls::stream<int> &slice,
+    pkt *core,
+    hls::stream<pkt> &core_stream,
+    int len
+)
+{
+    int offset = slice.read();
+    for(int i = 0; i < len; i++)
+    {
+#pragma HLS pipeline
+        pkt temp = core_stream.read();
+        core[offset + i] = temp;
+    }
+}
+
+void coo_sparser(
+    sp_data *data_in,
+    hls::stream<int> &indice_0,
+    hls::stream<int> &indice_1,
+    hls::stream<int> &indice_2,
+    hls::stream<int> &indice_3,
+    hls::stream<data_t> &data
+)
+{
+#pragma HLS data_pack variable = data_in
+#pragma HLS pipeline
+    sp_data temp = *data_in;
+    int indice0 = temp.indices[0];
+    int indice1 = temp.indices[1];
+    int indice2 = temp.indices[2];
+    int indice3 = temp.indices[3];
+
+    indice_0.write(indice0);
+    indice_1.write(indice1);
+    indice_2.write(indice2);
+    indice_3.write(indice3);
+
+    data.write(temp.data);
 }
 
 void write_back_engine(
@@ -584,30 +636,43 @@ void pipe(
     hls::stream<pkt> core3_pipevm, core3_pipemv;
     hls::stream<pkt> core1_, core2_, core3_, core4_;
     hls::stream<pkt> core1_for_update, core2_for_update, core3_for_update, core4_for_update;
-    hls::stream<sp_data> data_in_, y, update_indices; 
+    //hls::stream<sp_data> data_in_, y, update_indices; 
     hls::stream<pkt> g2l, g3l, g4l, g1r, g2r, g3r;
     hls::stream<pkt> g4l_, g4l__, core4_1, core4_2;
     hls::stream<pkt> grad1, grad2, grad3, grad4;
     hls::stream<pkt> core1_update, core2_update, core3_update, core4_update;
-    hls::stream<data_t> x;
+    hls::stream<data_t> x, y;
+    hls::stream<int> indice_0, indice_1, indice_2, indice_3, indice_0_, indice_1_, indice_2_, indice_3_;
+    hls::stream<int> indice_0_for_update, indice_1_for_update, indice_2_for_update, indice_3_for_update;
 
     //fetch data
-    data_fetch_engine(data_in, core1, core2, core3, core4, core1_in, core2_in, core3_in, core4_in, data_in_);
+    //data_fetch_engine(data_in, core1, core2, core3, core4, core1_in, core2_in, core3_in, core4_in, data_in_);
+    coo_sparser(data_in, indice_0, indice_1, indice_2, indice_3, y);
+
+    dup_stream_int(indice_0, indice_0_, indice_0_for_update);
+    dup_stream_int(indice_1, indice_1_, indice_1_for_update);
+    dup_stream_int(indice_2, indice_2_, indice_2_for_update);
+    dup_stream_int(indice_3, indice_3_, indice_3_for_update);
+
+    read_engine(indice_0_, core1, core1_in, 1);
+    read_engine(indice_1_, core2, core2_in, N);
+    read_engine(indice_2_, core3, core3_in, N);
+    read_engine(indice_3_, core4, core4_in, 1);
 
     dup_stream(core1_in, core1_, core1_for_update);
-
     for(int i = 0; i < N; i ++){
         dup_stream(core2_in, core2_, core2_for_update);
         dup_stream(core3_in, core3_, core3_for_update);
     }
     dup_stream(core4_in, core4_, core4_for_update);
+
     dup_stream(core4_, core4_1, core4_2);
     for(int i = 0; i < N; i++)
     {
         dup_stream(core2_, core2_pipevm, core2_pipemv);
         dup_stream(core3_, core3_pipevm, core3_pipemv);
     }
-    dup_stream_sp(data_in_, y, update_indices);
+    //dup_stream_sp(data_in_, y, update_indices);
 
     //calculate gnl and gnr
     mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_1, g2l, g3l, g4l, g1r, g2r, g3r);
@@ -617,7 +682,7 @@ void pipe(
     //calculate x
     dot(g4l_, core4_2, x);
     data_t x_ = x.read();
-    data_t y_ = (y.read()).data;
+    data_t y_ = (y.read());
     data_t scaling = (x_ - y_) * 0.01;
 
     outer(scaling, g2l, g2r, grad2);
@@ -633,6 +698,9 @@ void pipe(
     }
     update(core4_for_update, grad4, core4_update);
     
-    write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
-
+    //write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
+    wirte_engine(indice_0_for_update, core1, core1_update, 1);
+    wirte_engine(indice_1_for_update, core2, core2_update, N);
+    wirte_engine(indice_2_for_update, core3, core3_update, N);
+    wirte_engine(indice_3_for_update, core4, core4_update, 1);
 }
