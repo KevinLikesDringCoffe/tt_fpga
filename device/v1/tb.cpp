@@ -44,7 +44,8 @@ void pipe(
     pkt *core1,
     pkt *core2,
     pkt *core3,
-    pkt *core4
+    pkt *core4,
+    int slc
 );
 
 void rand_core(int rn_prev, int rn, int in, float *out)
@@ -227,20 +228,79 @@ void update_slice(float *slice, int m, int n, float lr, float *grad)
     return;
 }
 
+void get_idx(int idx1d, int *size, int dim, int *idx_list)
+{
+    int acc1 = 1;
+    int acc2 = size[dim - 1];
+    for(int idx = dim - 1; idx > -1; idx--)
+    {
+        idx_list[idx] = (idx1d % acc2) / acc1;
+        acc1 *= size[idx];
+        acc2 *= size[idx - 1];
+    } 
+
+    return;
+}
+
+void core2tensor(float **tt_core, int *tt_rank, int *tensor_size, int dim, float *out)
+{
+    int len = 1;
+    for(int i = 0; i < dim; i++)
+    {
+        len *= tensor_size[i];
+    }
+
+    int idx_list[dim];
+    float *core[dim];
+     
+    float vec[MAX_BUF_SIZE];
+
+    for(int i = 0; i < len; i++)
+    {   
+        /*
+        int acc1 = 1;
+        int acc2 = tensor_size[dim - 1];
+        for(int idx = dim - 1; idx > -1; idx--)
+        {
+            idx_list[idx] = (i % acc2) / acc1;
+            acc1 *= tensor_size[idx];
+            acc2 *= tensor_size[idx - 1];
+        } 
+        */
+
+        get_idx(i, tensor_size, dim, idx_list);
+
+        for(int j = dim - 1; j > -1; j--)
+        {
+            core[j] = tt_core[j] + idx_list[j] * tt_rank[j] * tt_rank[j+1];
+        }
+
+        g_nr(core, tt_rank, 0, dim, vec);
+        out[i] = dot(vec, core[0], tt_rank[1]);
+    }
+
+    return;
+}
+
 int main()
 {   
     int mode = M;
     int tt_rank[M + 1] = {1, 16, 16, 16, 1};
-    int tensor_size[M] = {100, 100, 100, 100};
+    int tensor_size[M] = {10, 10, 10, 10};
 
     float *tt_core[mode];
     float *grad[mode];
-    sp_data sp;
-    sp.indices[0] = 1;
-    sp.indices[1] = 2;
-    sp.indices[2] = 3;
-    sp.indices[3] = 4;
-    sp.data = 0.5;
+
+    int slc = 10;
+    sp_data *sp = (sp_data *) malloc(sizeof(sp_data) * 10);
+    for(int i = 0; i < slc; i++)
+    {
+        sp[i].data = 1;
+        for(int j = 0; j < M; j++)
+        {
+            sp[i].indices[j] = i;
+        }
+    }
 
     //allocate space for the tt core and initialization
     for(int i = 0; i < mode; i++)
@@ -248,67 +308,8 @@ int main()
         tt_core[i] = (float *) malloc(tt_rank[i] * tt_rank[i+1] * tensor_size[i] * sizeof(float));
         rand_core(tt_rank[i], tt_rank[i+1], tensor_size[i], tt_core[i]);
     }
-
-    //allocate space for gradient matrix
-    for(int i = 0; i < mode; i++)
-    {
-        grad[i] = (float *) malloc(tt_rank[i] * tt_rank[i+1] * sizeof(float));
-    }
-
-    float *core[mode];
-    float vec[MAX_BUF_SIZE];
-    float vecT[MAX_BUF_SIZE];
-    float x;
-
-    for(int j = mode-1; j > -1; j--)
-    {
-        core[j] = tt_core[j] + sp.indices[j] * tt_rank[j] * tt_rank[j+1];
-    }
-
-    for(int j = 0; j < mode; j++)
-    {   
-        //printf("Mode %d, outer product:\n", j + 1);
-        if(j == 0)
-        {
-            g_nr(core, tt_rank, 0, mode, grad[0]);
-            /*
-            for(int i = 0; i < N; i++)
-            {
-                printf("%f ", grad[0][i]);
-            }
-            printf("\n");
-            */
-        }
-        else if(j == mode-1)
-        {
-            g_nl(core, tt_rank, mode-1, mode, grad[mode-1]);
-            /*
-            for(int i = 0; i < N; i++)
-            {
-                printf("%f ", grad[mode-1][i]);
-            }
-            printf("\n");
-            */
-        }
-        else
-        {
-            g_nl(core, tt_rank, j, mode, vecT);
-            g_nr(core, tt_rank, j, mode, vec);
-            outer(vecT, vec, tt_rank[j], tt_rank[j+1], grad[j]);
-            //x = dot(vec, vecT, tt_rank[j+1]);
-            /*
-            for(int i = 0; i < N * N; i++)
-            {
-                printf("%f ", grad[j][i]);
-            }
-            printf("\n");
-            */
-        } 
-        
-    }
-
-    x = sumup(grad[1], core[1], tt_rank[1] * tt_rank[1+1]);
-    float y = sp.data;
+    
+    float *out = (float *) malloc(sizeof(float) * 10 * 10 * 10 * 10);
 /*
     for(int j = 0 ; j < mode; j ++)
     {
@@ -316,16 +317,26 @@ int main()
         update_slice(core[j], tt_rank[j], tt_rank[j+1], 0.01, grad[j]);
     }
 */
-    pipe(&sp, (pkt *)tt_core[0], (pkt *)tt_core[1], (pkt *)tt_core[2], (pkt *)tt_core[3]);
 
+    for(int i = 0; i < 10000; i++)
+    {
+        pipe(sp, (pkt *)tt_core[0], (pkt *)tt_core[1], (pkt *)tt_core[2], (pkt *)tt_core[3], slc);
+    }
+    core2tensor(tt_core, tt_rank, tensor_size, M, out);
+    /*
     for(int i = 0; i < mode; i++)
     {   
         printf("The %dth core value is:", i);
         for(int j = 0; j < tt_rank[i] * tt_rank[i+1]; j ++)
         {
-            printf("%f ", *(core[i] + j));
+            printf("%f ", *(tt_core[i] + j));
         }
         printf("\n");
+    }*/
+
+    for(int i = 0; i < 10 * 10 * 10 * 10; i++)
+    {
+        printf(" %f", out[i]);
     }
 
 /* mvchain test code

@@ -1,4 +1,5 @@
 #include <hls_stream.h>
+//#include "stdlib.h"
 
 #define N 16
 typedef float data_t;
@@ -450,10 +451,12 @@ void read_engine(
     int len
 )
 {
+#pragma HLS dataflow
     int offset = slice.read();
     
     for(int i = 0; i < len; i++)
     {
+#pragma HLS loop_tripcount min = 16 max = 16
 #pragma HLS pipeline
         pkt temp = core[offset + i];
         core_stream.write(temp);
@@ -467,9 +470,11 @@ void wirte_engine(
     int len
 )
 {
+#pragma HLS dataflow
     int offset = slice.read();
     for(int i = 0; i < len; i++)
     {
+#pragma HLS loop_tripcount min = 16 max = 16
 #pragma HLS pipeline
         pkt temp = core_stream.read();
         core[offset + i] = temp;
@@ -482,12 +487,13 @@ void coo_sparser(
     hls::stream<int> &indice_1,
     hls::stream<int> &indice_2,
     hls::stream<int> &indice_3,
-    hls::stream<data_t> &data
+    hls::stream<data_t> &data,
+    int offset
 )
 {
 #pragma HLS data_pack variable = data_in
-#pragma HLS pipeline
-    sp_data temp = *data_in;
+#pragma HLS dataflow
+    sp_data temp = data_in[offset];
     int indice0 = temp.indices[0];
     int indice1 = temp.indices[1];
     int indice2 = temp.indices[2];
@@ -595,7 +601,7 @@ void update(
     hls::stream<pkt> &out
 )
 {   
-#pragma HLS pipeline    
+#pragma HLS dataflow  
     pkt core_ = core.read();
     pkt grad_ = grad.read();
     pkt temp;
@@ -615,7 +621,8 @@ void pipe(
     pkt *core1,
     pkt *core2,
     pkt *core3,
-    pkt *core4
+    pkt *core4,
+    int slc
 )
 {
 #pragma HLS interface port = data_in mode = m_axi offset = slave bundle = gmem0
@@ -630,6 +637,7 @@ void pipe(
 #pragma HLS interface s_axilite port = core3
 #pragma HLS interface s_axilite port = core4
 
+    data_t loss = 0;
 #pragma HLS dataflow
     hls::stream<pkt> core1_in, core2_in, core3_in, core4_in;
     hls::stream<pkt> core2_pipevm, core2_pipemv;
@@ -647,60 +655,100 @@ void pipe(
 
     //fetch data
     //data_fetch_engine(data_in, core1, core2, core3, core4, core1_in, core2_in, core3_in, core4_in, data_in_);
-    coo_sparser(data_in, indice_0, indice_1, indice_2, indice_3, y);
-
-    dup_stream_int(indice_0, indice_0_, indice_0_for_update);
-    dup_stream_int(indice_1, indice_1_, indice_1_for_update);
-    dup_stream_int(indice_2, indice_2_, indice_2_for_update);
-    dup_stream_int(indice_3, indice_3_, indice_3_for_update);
-
-    read_engine(indice_0_, core1, core1_in, 1);
-    read_engine(indice_1_, core2, core2_in, N);
-    read_engine(indice_2_, core3, core3_in, N);
-    read_engine(indice_3_, core4, core4_in, 1);
-
-    dup_stream(core1_in, core1_, core1_for_update);
-    for(int i = 0; i < N; i ++){
-        dup_stream(core2_in, core2_, core2_for_update);
-        dup_stream(core3_in, core3_, core3_for_update);
-    }
-    dup_stream(core4_in, core4_, core4_for_update);
-
-    dup_stream(core4_, core4_1, core4_2);
-    for(int i = 0; i < N; i++)
+coo_read:
+    for(int iter = 0; iter < slc; iter++)
     {
-        dup_stream(core2_, core2_pipevm, core2_pipemv);
-        dup_stream(core3_, core3_pipevm, core3_pipemv);
+        coo_sparser(data_in, indice_0, indice_1, indice_2, indice_3, y, iter);
     }
-    //dup_stream_sp(data_in_, y, update_indices);
 
-    //calculate gnl and gnr
-    mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_1, g2l, g3l, g4l, g1r, g2r, g3r);
-
-    dup_stream(g4l, g4l_, g4l__);
-    
-    //calculate x
-    dot(g4l_, core4_2, x);
-    data_t x_ = x.read();
-    data_t y_ = (y.read());
-    data_t scaling = (x_ - y_) * 0.01;
-
-    outer(scaling, g2l, g2r, grad2);
-    outer(scaling, g3l, g3r, grad3);
-    scale(scaling, g1r, grad1);
-    scale(scaling, g4l__, grad4);
-
-    update(core1_for_update, grad1, core1_update);
-    for(int i = 0; i < N; i++)
+index_dup:
+    for(int iter = 0; iter < slc; iter++)
     {
-        update(core2_for_update, grad2, core2_update);
-        update(core3_for_update, grad3, core3_update);
+        dup_stream_int(indice_0, indice_0_, indice_0_for_update);
+        dup_stream_int(indice_1, indice_1_, indice_1_for_update);
+        dup_stream_int(indice_2, indice_2_, indice_2_for_update);
+        dup_stream_int(indice_3, indice_3_, indice_3_for_update);
     }
-    update(core4_for_update, grad4, core4_update);
-    
-    //write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
-    wirte_engine(indice_0_for_update, core1, core1_update, 1);
-    wirte_engine(indice_1_for_update, core2, core2_update, N);
-    wirte_engine(indice_2_for_update, core3, core3_update, N);
-    wirte_engine(indice_3_for_update, core4, core4_update, 1);
+
+core_read:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        read_engine(indice_0_, core1, core1_in, 1);
+        read_engine(indice_1_, core2, core2_in, N);
+        read_engine(indice_2_, core3, core3_in, N);
+        read_engine(indice_3_, core4, core4_in, 1);
+
+    }
+
+core_dup:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        dup_stream(core1_in, core1_, core1_for_update);
+        for(int i = 0; i < N; i ++){
+            dup_stream(core2_in, core2_, core2_for_update);
+            dup_stream(core3_in, core3_, core3_for_update);
+        }
+        dup_stream(core4_in, core4_, core4_for_update);
+
+        dup_stream(core4_, core4_1, core4_2);
+        for(int i = 0; i < N; i++)
+        {
+            dup_stream(core2_, core2_pipevm, core2_pipemv);
+            dup_stream(core3_, core3_pipevm, core3_pipemv);
+        }
+    }
+        //dup_stream_sp(data_in_, y, update_indices);
+
+        //calculate gnl and gnr
+mv_chain:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_1, g2l, g3l, g4l, g1r, g2r, g3r);
+    }
+
+stream_dup:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        dup_stream(g4l, g4l_, g4l__);
+    }    
+        //calculate x
+
+outer:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        dot(g4l_, core4_2, x);
+        data_t x_ = x.read();
+        data_t y_ = (y.read());
+        data_t scaling = (x_ - y_) * 0.00001;
+
+        outer(scaling, g2l, g2r, grad2);
+        outer(scaling, g3l, g3r, grad3);
+        scale(scaling, g1r, grad1);
+        scale(scaling, g4l__, grad4);
+
+        //loss += (x_ - y_) * (x_ - y_);
+    }
+
+update:
+    for(int iter = 0; iter < slc; iter++)
+    {
+        update(core1_for_update, grad1, core1_update);
+        for(int i = 0; i < N; i++)
+        {
+            update(core2_for_update, grad2, core2_update);
+            update(core3_for_update, grad3, core3_update);
+        }
+        update(core4_for_update, grad4, core4_update);
+    }
+
+        //write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
+write_back:   
+    for(int iter = 0; iter < slc; iter++){
+        wirte_engine(indice_0_for_update, core1, core1_update, 1);
+        wirte_engine(indice_1_for_update, core2, core2_update, N);
+        wirte_engine(indice_2_for_update, core3, core3_update, N);
+        wirte_engine(indice_3_for_update, core4, core4_update, 1);
+    }
+
+    //printf("loss is : %f\n", loss);
 }
