@@ -32,5 +32,7 @@ void g_nr(float **core, int *tt_rank, int k, int dim, float *out)
 
     //out = temp_buf;
 
+    free(vector_buf);
+    
     return;
 }

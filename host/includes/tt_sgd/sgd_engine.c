@@ -15,6 +15,10 @@ void sgd_engine(sp_data *sp, int nnz, int mode, int *tt_rank, int *tensor_size, 
         grad[i] = (float *) malloc(tt_rank[i] * tt_rank[i+1] * sizeof(float));
     }
 
+
+    float *vec = (float *) malloc(sizeof(float) * MAX_BUF_SIZE);
+    float *vecT = (float *) malloc(sizeof(float) * MAX_BUF_SIZE);
+
     start = clock();
 
     for(int i = 0; i < maxiter; i++)
@@ -22,8 +26,7 @@ void sgd_engine(sp_data *sp, int nnz, int mode, int *tt_rank, int *tensor_size, 
         float loss = 0;
         for(int sample = 0; sample < nnz; sample++)
         {
-            float *vec = (float *) malloc(sizeof(float) * MAX_BUF_SIZE);
-            float *vecT = (float *) malloc(sizeof(float) * MAX_BUF_SIZE);
+            
             float *core[mode];
 
             for(int j = mode-1; j > -1; j--)
@@ -76,5 +79,8 @@ void sgd_engine(sp_data *sp, int nnz, int mode, int *tt_rank, int *tensor_size, 
     
     printf("\ntime cost: %f s\n", duration);
 
+    free(vec);
+    free(vecT);
+    
     return;
 }

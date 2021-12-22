@@ -12,7 +12,7 @@ int main()
     float margin = 0.05;
     int mode = M;
     int tt_rank[M + 1] = {1, 16, 16, 16, 1};
-    int tensor_size[M] = {50, 50, 50, 50};
+    int tensor_size[M] = {10, 10, 10, 10};
 
     float *tt_core[mode];
     float *grad[mode];
