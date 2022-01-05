@@ -658,12 +658,14 @@ void pipe(
 coo_read:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         coo_sparser(data_in, indice_0, indice_1, indice_2, indice_3, y, iter);
     }
 
 index_dup:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         dup_stream_int(indice_0, indice_0_, indice_0_for_update);
         dup_stream_int(indice_1, indice_1_, indice_1_for_update);
         dup_stream_int(indice_2, indice_2_, indice_2_for_update);
@@ -673,6 +675,7 @@ index_dup:
 core_read:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         read_engine(indice_0_, core1, core1_in, 1);
         read_engine(indice_1_, core2, core2_in, N);
         read_engine(indice_2_, core3, core3_in, N);
@@ -683,6 +686,7 @@ core_read:
 core_dup:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         dup_stream(core1_in, core1_, core1_for_update);
         for(int i = 0; i < N; i ++){
             dup_stream(core2_in, core2_, core2_for_update);
@@ -703,12 +707,14 @@ core_dup:
 mv_chain:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         mvchain_pipe(core1_, core2_pipevm, core3_pipevm, core2_pipemv, core3_pipemv, core4_1, g2l, g3l, g4l, g1r, g2r, g3r);
     }
 
 stream_dup:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         dup_stream(g4l, g4l_, g4l__);
     }    
         //calculate x
@@ -716,6 +722,7 @@ stream_dup:
 outer:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         dot(g4l_, core4_2, x);
         data_t x_ = x.read();
         data_t y_ = (y.read());
@@ -732,6 +739,7 @@ outer:
 update:
     for(int iter = 0; iter < slc; iter++)
     {
+#pragma HLS loop_tripcount min = 100 max = 1000000
         update(core1_for_update, grad1, core1_update);
         for(int i = 0; i < N; i++)
         {
@@ -744,6 +752,7 @@ update:
         //write_back_engine(core1, core2, core3, core4, core1_update, core2_update, core3_update, core4_update, update_indices);
 write_back:   
     for(int iter = 0; iter < slc; iter++){
+#pragma HLS loop_tripcount min = 100 max = 1000000
         wirte_engine(indice_0_for_update, core1, core1_update, 1);
         wirte_engine(indice_1_for_update, core2, core2_update, N);
         wirte_engine(indice_2_for_update, core3, core3_update, N);

@@ -318,10 +318,8 @@ int main()
     }
 */
 
-    for(int i = 0; i < 10000; i++)
-    {
-        pipe(sp, (pkt *)tt_core[0], (pkt *)tt_core[1], (pkt *)tt_core[2], (pkt *)tt_core[3], slc);
-    }
+    pipe(sp, (pkt *)tt_core[0], (pkt *)tt_core[1], (pkt *)tt_core[2], (pkt *)tt_core[3], slc);
+    
     core2tensor(tt_core, tt_rank, tensor_size, M, out);
     /*
     for(int i = 0; i < mode; i++)

@@ -1,6 +1,7 @@
 #include "cmdlineparser.h"
 #include <iostream>
 #include <cstring>
+#include "tt_sgd.h"
 
 // XRT includes
 #include "experimental/xrt_bo.h"
@@ -11,70 +12,83 @@
 #include <stdlib.h>
 #include <string.h>
 
-void gemv(float *matrix, float * vector, int m, int n, float *out)
-{
-    //initialization
-    for(int i = 0; i < m; i++)
-    {
-        out[i] = 0;
-    }
-    
-    float acc;
+#define M 4
 
-    for(int i = 0; i < m; i++)
+void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *tensor_size) {
+    float mr = 0.8;
+    float margin = 0.05;
+    int mode = M;
+    int tt_rank[M + 1] = {1, 16, 16, 16, 1};
+
+    float *tt_core[mode];
+    float *grad[mode];
+
+    int len = 1;
+
+    for(int i = 0; i < mode; i++)
     {
-        acc = 0;
-        for(int j = 0; j < n; j++)
-        {
-            acc += matrix[i*n + j] * vector[j];
-        }
-        out[i] = acc;
+        len *= tensor_size[i];
     }
 
-    return;
-}
+    float *t = (float *) malloc(len * sizeof(float));
 
-void randmem(float *ptr, int size)
-{
-    srand(static_cast <unsigned> (time(0)));
+    ones_tensor(tensor_size, mode, t);
 
-    for(int i = 0; i < size; i++)
+    //allocate space for the tt core and initialization
+    /*
+    for(int i = 0; i < mode; i++)
     {
-        float r = static_cast <float> (rand() / static_cast <float> (RAND_MAX));
-        ptr[i] = r;
+        tt_core[i] = (float *) malloc(tt_rank[i] * tt_rank[i+1] * tensor_size[i] * sizeof(float));
+        rand_core(tt_rank[i], tt_rank[i+1], tensor_size[i], tt_core[i]);
     }
-}
+    */
 
-void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsigned int size, unsigned int slc) {
-    size_t vector_size_bytes = sizeof(float) * size * slc;
-    size_t matrix_size_bytes = sizeof(float) * size * size * slc;
-    
+    //allocate space for recovered tensor
+    float *out = (float *) malloc(len * sizeof(float));
 
     std::cout << "Allocate Buffer in Global Memory\n";
-    auto vec = xrt::bo(device, vector_size_bytes, bank_assign[0]);
-    auto mat1 = xrt::bo(device, matrix_size_bytes, bank_assign[1]);
-    auto mat2 = xrt::bo(device, matrix_size_bytes, bank_assign[2]);
-    auto mat3 = xrt::bo(device, matrix_size_bytes, bank_assign[3]);
-    auto mat4 = xrt::bo(device, matrix_size_bytes, bank_assign[4]);
-    auto out = xrt::bo(device, vector_size_bytes, bank_assign[5]);
-
+    auto sp_in = xrt::bo(device, (int) (sizeof(sp_data) * len * (mr + margin)), krnl.group_id(0));
+    auto core1 = xrt::bo(device, tt_rank[0] * tt_rank[1] * tensor_size[0] * sizeof(float), krnl.group_id(1));
+    auto core2 = xrt::bo(device, tt_rank[1] * tt_rank[2] * tensor_size[1] * sizeof(float), krnl.group_id(2));
+    auto core3 = xrt::bo(device, tt_rank[2] * tt_rank[3] * tensor_size[2] * sizeof(float), krnl.group_id(3));
+    auto core4 = xrt::bo(device, tt_rank[3] * tt_rank[4] * tensor_size[3] * sizeof(float), krnl.group_id(4));
+    
+    std::cout << "The memory bank of the correspoding arguments are : "<< krnl.group_id(0) <<krnl.group_id(1) << krnl.group_id(2) << krnl.group_id(3) << krnl.group_id(4) << std::endl;
     // Map the contents of the buffer object into host memory
-    auto vec_map = vec.map<float*>();
-    auto mat1_map = mat1.map<float*>();
-    auto mat2_map = mat2.map<float*>();
-    auto mat3_map = mat3.map<float*>();
-    auto mat4_map = mat4.map<float*>();
-    auto out_map = out.map<float*>();
+    auto sp_in_map = sp_in.map<sp_data*>();
+    auto core1_map = core1.map<float*>();
+    auto core2_map = core2.map<float*>();
+    auto core3_map = core3.map<float*>();
+    auto core4_map = core4.map<float*>();
 
     std::cout << "Randomize the Test Cores.\n";
-    randmem(vec_map, size * slc);
-    randmem(mat1_map, size * size * slc);
-    randmem(mat2_map, size * size * slc);
-    randmem(mat3_map, size * size * slc);
-    randmem(mat4_map, size * size * slc);
+    rand_core(tt_rank[0], tt_rank[1], tensor_size[0], core1_map);
+    rand_core(tt_rank[1], tt_rank[2], tensor_size[1], core2_map);
+    rand_core(tt_rank[2], tt_rank[3], tensor_size[2], core3_map);
+    rand_core(tt_rank[3], tt_rank[4], tensor_size[3], core4_map);
+    int nnz = rand_sample_sp_data(t, mode, tensor_size, mr, sp_in_map);
 
-    float out_ref[size * slc];
+    tt_core[0] = core1_map;
+    tt_core[1] = core2_map;
+    tt_core[2] = core3_map;
+    tt_core[3] = core4_map;
 
+    std::cout << "start sw emulation" << std::endl;
+
+    std::chrono::duration<double> host_time(0);
+
+    std::cout << "Execution of the kernel\n";
+
+    //auto host_start = std::chrono::high_resolution_clock::now();
+    sgd_engine(sp_in_map, nnz, mode, tt_rank, tensor_size, tt_core, out, 0.000001, 1);
+
+    //auto host_end = std::chrono::high_resolution_clock::now();
+    //host_time = std::chrono::duration<double>(host_end - host_start);
+
+    //std::cout << "The SW execution time is" << host_time.count() << std::endl;
+    // Get the output;
+   
+/*
     std::chrono::duration<double> sw_time(0);
     auto sw_start = std::chrono::high_resolution_clock::now();
 
@@ -93,46 +107,31 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
 
     auto sw_end = std::chrono::high_resolution_clock::now();
     sw_time = std::chrono::duration<double>(sw_end - sw_start);
-
-/*
-    std::fill(vec_map, vec_map + size * 100, 1);
-    std::fill(mat1_map, mat1_map + size * size * 100, 1);
-    std::fill(mat2_map, mat2_map + size * size * 100, 1);
-    std::fill(mat3_map, mat3_map + size * size * 100, 1);
-    std::fill(out_map, out_map + size * 100, 1);
 */
+    std::cout << "Synchronize input buffer data to device global memory\n";
 
-    // Create the test data
-    /*
-    int bufReference[size];
-    for (uint32_t i = 0; i < size; ++i) {
-        bo0_map[i] = i;
-        bo1_map[i] = i;
-        bufReference[i] = bo0_map[i] + bo1_map[i];
-    }
-    */
-
-    // Synchronize buffer content with device side
-    std::cout << "synchronize input buffer data to device global memory\n";
-
-    vec.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    mat1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    mat2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    mat3.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-    mat4.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    sp_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    core1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    core2.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    core3.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    core4.sync(XCL_BO_SYNC_BO_TO_DEVICE);
 
     std::chrono::duration<double> kernel_time(0);
 
     std::cout << "Execution of the kernel\n";
     auto kernel_start = std::chrono::high_resolution_clock::now();
-    auto run = krnl(vec, mat1, mat2, mat3, mat4, out, slc);
+
+    auto run = krnl(sp_in, core1, core2, core3, core4, nnz);
     run.wait();
     auto kernel_end = std::chrono::high_resolution_clock::now();
 
     kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
     // Get the output;
     std::cout << "Get the output data from the device" << std::endl;
-    out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    core1.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    core2.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    core3.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    core4.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
     // Validate our results
     
@@ -142,13 +141,14 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, unsig
     */
 
     double result;
-    result = (4 * size * size) * slc * sizeof(float);
+    result = (4 * 16 * 16)  * sizeof(float) * nnz;
     result /= (1000 * 1000 * 1000); // to GB
     result /= kernel_time.count();   // to GBps
 
+    std::cout << std::endl << "THE TOTAL KERNEL TIME COST IS " << kernel_time.count() << std::endl;
     std::cout << "THROUGHPUT = " << result << " GB/s " << std::endl;
 
-    std::cout << "Acceleration ratio = " << sw_time.count() / kernel_time.count() << "x" << std::endl;
+    //std::cout << "Acceleration ratio = " << sw_time.count() / kernel_time.count() << "x" << std::endl;
 
     std::cout << "TEST PASSED" << std::endl;
 
@@ -179,18 +179,17 @@ int main(int argc, char* argv[]) {
     std::cout << "Load the xclbin " << binaryFile << std::endl;
     auto uuid = device.load_xclbin(binaryFile);
 
-    auto krnl = xrt::kernel(device, uuid, "gemv_pipeline");
+    auto krnl = xrt::kernel(device, uuid, "pipe");
+    const int numBuf = M + 1; // Since three buffers are being used
 
-    unsigned int dataSize = 32;
-    unsigned int slc = 1;
-    double kernel_time_in_sec = 0, result = 0;
-    const int numBuf = 6; // Since three buffers are being used
     int bank_assign[numBuf];
     for (int j = 0; j < numBuf; j++) {
         bank_assign[j] = j;
     }
 
-    run_krnl(device, krnl, bank_assign, dataSize, slc);
+    int size[M] = {50, 50, 50, 50};
+
+    run_krnl(device, krnl, bank_assign, size);
     
     return 0;
 }

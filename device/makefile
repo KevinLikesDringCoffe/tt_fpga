@@ -5,16 +5,16 @@ DIRS :=
 #DIRS += -I'$(XILINX_VIVADO)/include'
 #DIRS += -I'$(XILINX_VITIS)/include'
 
-OBJ := gemv_pipeline.xo
+OBJ := mvpipe.xo
 #OBJ := $(subst .cpp, .xo, $(wildcard *.cpp))
-DEPS := gemv32.hpp
-BIN := gemv_pipeline.xclbin
+DEPS := 
+BIN := mvpipe.xclbin
 
 $(BIN) : $(OBJ)
 	v++ $(VPPFLAGS) --link --vivado.impl.jobs 12 --vivado.synth.jobs 12 '$^' -o'$@' --config ./connectivity.cfg
 
 %.xo : %.cpp $(DEPS)
-	v++ $(VPPFLAGS) -c -k $(basename $(@)) $(DIRS) -I'$(<D)' -o'$@' $<
+	v++ $(VPPFLAGS) -c -k pipe $(DIRS) -I'$(<D)' -o'$@' $<
 
 .PHONY : clean run
 
