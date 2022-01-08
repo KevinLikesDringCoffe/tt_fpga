@@ -61,7 +61,7 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
     auto core3_map = core3.map<float*>();
     auto core4_map = core4.map<float*>();
 
-    std::cout << "Randomize the Test Cores.\n";
+    std::cout << "Randomize the TT Cores.\n";
     rand_core(tt_rank[0], tt_rank[1], tensor_size[0], core1_map);
     rand_core(tt_rank[1], tt_rank[2], tensor_size[1], core2_map);
     rand_core(tt_rank[2], tt_rank[3], tensor_size[2], core3_map);
@@ -72,8 +72,8 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
     tt_core[1] = core2_map;
     tt_core[2] = core3_map;
     tt_core[3] = core4_map;
-
-    std::cout << "start sw emulation" << std::endl;
+/*
+    std::cout << "Start sw emulation" << std::endl;
 
     std::chrono::duration<double> host_time(0);
 
@@ -87,27 +87,8 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
 
     //std::cout << "The SW execution time is" << host_time.count() << std::endl;
     // Get the output;
-   
-/*
-    std::chrono::duration<double> sw_time(0);
-    auto sw_start = std::chrono::high_resolution_clock::now();
-
-    std::cout << "Start SW execution.\n";
-    for(int i = 0; i < slc; i++)
-    {
-        float buffer1[size];
-        gemv(mat1_map + i * size * size, vec_map + i * size, size, size, buffer1);
-        float buffer2[size];
-        gemv(mat2_map + i * size * size, buffer1, size, size, buffer2);
-        float buffer3[size];
-        gemv(mat3_map + i * size * size, buffer2, size, size, buffer3);
-
-        gemv(mat4_map + i * size * size, buffer3, size, size, out_ref + i * size);
-    }
-
-    auto sw_end = std::chrono::high_resolution_clock::now();
-    sw_time = std::chrono::duration<double>(sw_end - sw_start);
 */
+   
     std::cout << "Synchronize input buffer data to device global memory\n";
 
     sp_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
@@ -141,7 +122,7 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
     */
 
     double result;
-    result = (4 * 16 * 16)  * sizeof(float) * nnz;
+    result = ((2 + 2/16 + 10/512) * 16 * 16)  * sizeof(float) * nnz;
     result /= (1000 * 1000 * 1000); // to GB
     result /= kernel_time.count();   // to GBps
 
@@ -187,7 +168,7 @@ int main(int argc, char* argv[]) {
         bank_assign[j] = j;
     }
 
-    int size[M] = {50, 50, 50, 50};
+    int size[M] = {5, 5, 5, 5};
 
     run_krnl(device, krnl, bank_assign, size);
     
