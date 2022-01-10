@@ -37,6 +37,7 @@ read_vec_stream:
     pkt temp = vec_in.read();
     for(int i = 0; i < N; i++)
     {
+#pragma HLS unroll
         vec_buffer[i] = temp.data[i];
     }
 
@@ -93,6 +94,7 @@ read_vec_stream:
     pkt temp = vec_in.read();
     for(int i = 0; i < N; i++)
     {
+#pragma HLS unroll
         vec_buffer[i] = temp.data[i];
     }
 
@@ -205,8 +207,6 @@ void outer(
 #pragma HLS array_partition variable = vec1_buffer type = complete dim = 1
     data_t vec2_buffer[N];
 #pragma HLS array_partition variable = vec2_buffer type = complete dim = 1
-    data_t out_buffer[N][N];
-#pragma HLS array_partition variable = out_buffer type = complete dim = 0
 
 #pragma HLS dataflow
 
@@ -229,12 +229,14 @@ read_vec2:
 outer:
     for(int i = 0; i < N; i++)
     {
+        pkt temp;
         for(int j = 0; j < N; j++)
         {
-            out_buffer[i][j] = vec1_buffer[i] * vec2_buffer[j] * scaling;
+            temp.data[j] = vec1_buffer[i] * vec2_buffer[j] * scaling;
         }
+        out.write(temp);
     }
-
+/*
 out_stream:
     for(int i = 0; i < N; i++)
     {
@@ -246,6 +248,7 @@ out_stream:
         }
         out.write(temp);
     }
+*/
 }
 
 template <int DUMMY = 0>

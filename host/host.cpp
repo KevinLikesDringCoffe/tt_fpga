@@ -101,10 +101,15 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
 
     std::cout << "Execution of the kernel\n";
     auto kernel_start = std::chrono::high_resolution_clock::now();
-
-    auto run = krnl(sp_in, core1, core2, core3, core4, nnz);
-    run.wait();
+    for(int i = 0; i < 50; i++)
+    {
+        auto run = krnl(sp_in, core1, core2, core3, core4, nnz);
+        run.wait();
+    }
+    
     auto kernel_end = std::chrono::high_resolution_clock::now();
+
+    
 
     kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
     // Get the output;
@@ -114,6 +119,12 @@ void run_krnl(xrtDeviceHandle device, xrt::kernel& krnl, int* bank_assign, int *
     core3.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
     core4.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
 
+    core2tensor(tt_core, tt_rank, tensor_size, mode, out);
+
+    for(int i = 0; i < 100; i++)
+    {
+        std::cout << out[i] << " ";
+    }
     // Validate our results
     
     /*
@@ -168,7 +179,7 @@ int main(int argc, char* argv[]) {
         bank_assign[j] = j;
     }
 
-    int size[M] = {5, 5, 5, 5};
+    int size[M] = {50, 50, 50, 50};
 
     run_krnl(device, krnl, bank_assign, size);
     
