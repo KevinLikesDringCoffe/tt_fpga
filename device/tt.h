@@ -345,7 +345,7 @@ void coo_sparser(
     int offset
 )
 {
-#pragma HLS data_pack variable = data_in
+#pragma HLS aggregate variable = data_in
 #pragma HLS dataflow
     sp_data temp = data_in[offset];
     int indice0 = temp.indices[0];

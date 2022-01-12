@@ -179,9 +179,115 @@ int main(int argc, char* argv[]) {
         bank_assign[j] = j;
     }
 
-    int size[M] = {50, 50, 50, 50};
+    int tensor_size[M] = {50, 50, 50, 50};
 
-    run_krnl(device, krnl, bank_assign, size);
+    //tensor related parameters
+    float mr = 0.8;
+    float margin = 0.05;
+    int mode = M;
+    int tt_rank[M + 1] = {1, 16, 16, 16, 1};
+
+    float *tt_core[mode];
+    float *grad[mode];
+
+    int len = 1;
+    int iter = 1;
+    float lr = 0.00001;
+
+    for(int i = 0; i < mode; i++)
+    {
+        len *= tensor_size[i];
+    }
+
+    float *t = (float *) malloc(len * sizeof(float));
+
+    ones_tensor(tensor_size, mode, t);
+
+    float *out = (float *) malloc(len * sizeof(float));
+
+    std::cout << "Allocate Buffer in Global Memory" << std::endl;
+    xrt::bo sp_in = xrt::bo(device, (int) (sizeof(sp_data) * len * (mr + margin)), krnl.group_id(0));
+
+    xrt::bo core_bo[M];
+    for(int i = 0; i < mode; i++)
+    {
+        core_bo[i] = xrt::bo(device, tt_rank[i] * tt_rank[i+1] * tensor_size[i] * sizeof(float), krnl.group_id(i+1));
+    }
     
+    sp_data* sp_in_map = sp_in.map<sp_data*>();
+    float* core_map[M];
+
+    for(int i = 0; i < mode; i++)
+    {
+        core_map[i] = core_bo[i].map<float*>();
+    }
+
+    std::cout << "Randomize the TT Cores." << std::endl;
+
+    for(int i = 0; i < mode; i++)
+    {
+        rand_core(tt_rank[i], tt_rank[i+1], tensor_size[i], core_map[i]);
+    }
+
+    int nnz = rand_sample_sp_data(t, mode, tensor_size, mr, sp_in_map);
+
+    std::cout << "Synchronize input buffer data to device global memory" << std::endl;
+    
+    sp_in.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    for(int i = 0; i < mode; i++)
+    {
+        core_bo[i].sync(XCL_BO_SYNC_BO_TO_DEVICE);
+    }
+
+    std::chrono::duration<double> kernel_time(0);
+
+    std::cout << "Execution of the kernel." << std::endl;
+    
+    auto kernel_start = std::chrono::high_resolution_clock::now();
+    
+    for(int i = 0; i < iter; i++)
+    {
+        auto run = krnl(sp_in, core_bo[0], core_bo[1], core_bo[2], core_bo[3], nnz, lr);
+        run.wait();
+        /*
+        for(int j = 0; j < mode; j ++)
+        {
+            core_bo[j].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+        }
+
+        std::cout << "Loss @ iter " << i <<" : " << loss(core_map, tt_rank, tensor_size, mode, sp_in_map, nnz) <<std::endl;
+        */
+    }
+
+    
+    
+    auto kernel_end = std::chrono::high_resolution_clock::now();
+
+    kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
+    // Get the output;
+    std::cout << "Get the output data from the device." << std::endl;
+
+    for(int i = 0; i < mode; i++)
+    {
+        core_bo[i].sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+    }
+
+    std::cout << "Loss : " << loss(core_map, tt_rank, tensor_size, mode, sp_in_map, nnz) <<std::endl;
+    core2tensor(core_map, tt_rank, tensor_size, mode, out);
+
+    //sgd_engine(sp_in_map, nnz, mode, tt_rank, tensor_size, core_map, out, lr, iter);
+
+    double result;
+    result = ((2 + 2/16 + 10/512) * 16 * 16)  * sizeof(float) * nnz * iter;
+    result /= (1000 * 1000 * 1000); // to GB
+    result /= kernel_time.count();   // to GBps
+
+    std::cout << std::endl << "THE TOTAL KERNEL TIME COST IS " << kernel_time.count() << std::endl;
+    std::cout << "THROUGHPUT = " << result << " GB/s " << std::endl;
+    
+    //std::cout << "Acceleration ratio = " << sw_time.count() / kernel_time.count() << "x" << std::endl;
+
+    std::cout << "TEST PASSED" << std::endl;
+
     return 0;
 }

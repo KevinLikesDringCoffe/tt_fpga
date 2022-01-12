@@ -8,7 +8,8 @@ void pipe(
     pkt *core2,
     pkt *core3,
     pkt *core4,
-    int slc
+    int slc,
+    data_t lr
 )
 {
 #pragma HLS interface port = data_in mode = m_axi offset = slave bundle = gmem0 latency = 0 num_read_outstanding=32 num_write_outstanding=32 
@@ -23,6 +24,7 @@ void pipe(
 #pragma HLS interface s_axilite port = core3
 #pragma HLS interface s_axilite port = core4
 #pragma HLS interface s_axilite port = slc
+#pragma HLS interface s_axilite port = lr
     
 #pragma HLS dataflow
 
@@ -166,7 +168,7 @@ outer:
         dot(g4l_, core4_2, x);
         data_t x_ = x.read();
         data_t y_ = y.read();
-        data_t scaling = (x_ - y_) * 0.00001;
+        data_t scaling = (x_ - y_) * lr;
 
         outer(scaling, g2l, g2r, grad2);
         outer(scaling, g3l, g3r, grad3);

@@ -46,3 +46,5 @@ void rand_sample(float *tensor, int *size ,float mr, sp_tensor *sp_t);
 void sgd_engine(sp_data *sp, int nnz, int mode, int *tt_rank, int *tensor_size, float **tt_core, float *out, float lr, int maxiter);
 
 int rand_sample_sp_data(float *tensor, int dim, int *size, float mr, sp_data *sp_t);
+
+float loss(float **tt_core, int *tt_rank, int *tensor_size, int dim, sp_data *sp, int nnz);

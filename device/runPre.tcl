@@ -1,1 +1,3 @@
 config_compile -unsafe_math_optimizations
+config_interface -m_axi_latency=0
+config_dataflow -fifo_depth=16
